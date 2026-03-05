@@ -2,6 +2,7 @@
 .claude/
 assets/
 config.toml
+output/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
