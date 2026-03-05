@@ -84,7 +84,7 @@ class Config:
     def _load_config(self) -> None:
         """Load and validate configuration from config.toml."""
         # Determine config.toml path (project root)
-        config_dir = Path(__file__).parent.parent
+        config_dir = Path(__file__).parent.parent.parent
         self._config_path = config_dir / "config.toml"
 
         logger.info(f"Loading config from: {self._config_path}")
