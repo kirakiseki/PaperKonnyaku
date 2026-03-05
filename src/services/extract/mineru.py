@@ -9,7 +9,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 import httpx
 from loguru import logger
@@ -51,7 +51,7 @@ class MinerUService:
     from the MinerU API.
 
     Usage:
-        from services.mineru import MinerUService
+        from services.extract.mineru import MinerUService
 
         async with MinerUService() as mineru:
             # Upload and wait for completion (polls until done)
@@ -118,7 +118,7 @@ class MinerUService:
         language: Optional[str] = None,
         callback: Optional[str] = None,
         seed: Optional[str] = None,
-        extra_formats: Optional[list] = None,
+        extra_formats: Optional[list] = ["html", "latex"],
     ) -> str:
         """Upload a single local file and create an extraction task.
 

@@ -3,7 +3,7 @@
 import pytest
 
 from core.config import config
-from services.mineru import MinerUService, TaskHistory
+from services.extract.mineru import MinerUService, TaskHistory
 
 
 @pytest.fixture
