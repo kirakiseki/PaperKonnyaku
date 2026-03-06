@@ -33,6 +33,15 @@ class TestConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     test_file: str = Field(default="tests/assets/test_example.pdf", description="Test file path")
+    test_assets_dir: Path = Field(default=Path("tests/assets/test_example"), description="Test assets directory")
+
+
+class RenderConfig(BaseModel):
+    """Render module configuration."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    outlier_width_threshold: float = Field(default=0.15, description="Outlier detection threshold for bbox alignment. Blocks with width difference ratio >= this threshold will be kept as-is (not stretched to column width)")
 
 
 class ExtractConfig(BaseModel):
@@ -50,6 +59,7 @@ class AppConfig(BaseModel):
 
     extract: ExtractConfig = Field(default=ExtractConfig(), description="Extract configuration")
     test: TestConfig = Field(default=TestConfig(), description="Test configuration")
+    render: RenderConfig = Field(default=RenderConfig(), description="Render configuration")
 
 
 class Config:
@@ -139,6 +149,10 @@ class Config:
     @property
     def test(self) -> TestConfig:
         return self._settings.test
+
+    @property
+    def render(self) -> RenderConfig:
+        return self._settings.render
 
 
 # Singleton instance that can be imported directly
