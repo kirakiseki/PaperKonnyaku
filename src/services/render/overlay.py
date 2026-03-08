@@ -45,6 +45,13 @@ BLOCK_TYPE_COLORS: Dict[BlockType, Tuple[float, float, float]] = {
     BlockType.OTHER: (0.5, 0.5, 0.5),  # Gray
 }
 
+# Color mapping for span types
+SPAN_TYPE_COLORS: Dict[str, Tuple[float, float, float]] = {
+    "text": (0.0, 0.0, 0.7),  # Dark blue
+    "inline_equation": (0.8, 0.2, 0.2),  # Dark red
+    "equation": (0.8, 0.4, 0.0),  # Dark orange
+}
+
 
 @dataclass
 class BoundingBox:
@@ -156,6 +163,17 @@ class OverlayRenderer:
             bt = BlockType.OTHER
         return self.color_map.get(bt, self.color_map[BlockType.OTHER])
 
+    def _get_span_color(self, span_type: str) -> Tuple[float, float, float]:
+        """Get color for a span type.
+
+        Args:
+            span_type: The span type string from MinerU (e.g., "text", "inline_equation").
+
+        Returns:
+            Tuple of (r, g, b) color values.
+        """
+        return SPAN_TYPE_COLORS.get(span_type, SPAN_TYPE_COLORS["text"])
+
     def parse_layout_data(
         self,
         layout_data: dict,
@@ -257,6 +275,7 @@ class OverlayRenderer:
         page_width: float,
         page_height: float,
         blocks: List[LayoutBlock],
+        include_spans: bool = False,
     ) -> io.BytesIO:
         """Create an overlay page with bounding boxes.
 
@@ -264,6 +283,7 @@ class OverlayRenderer:
             page_width: Width of the page in points.
             page_height: Height of the page in points.
             blocks: List of LayoutBlocks to render.
+            include_spans: Whether to include span-level bounding boxes.
 
         Returns:
             BytesIO containing the PDF overlay page.
@@ -327,6 +347,29 @@ class OverlayRenderer:
                     c.setFont("Helvetica", self.font_size - 1)  # Slightly smaller for lines
                     c.drawString(line_x0, line_y1 + 1, line.json_path)
 
+                # Draw span-level bounding boxes if enabled
+                if include_spans:
+                    for span in line.spans:
+                        span_x0, span_y0, span_x1, span_y1 = self._convert_bbox_to_pdf_coords(
+                            span.bbox, page_height
+                        )
+
+                        # Get color for span type
+                        span_color = self._get_span_color(span.span_type)
+                        sr, sg, sb = span_color
+
+                        # Draw span rectangle with its own color
+                        c.setStrokeColorRGB(sr, sg, sb)
+                        c.setFillColorRGB(sr, sg, sb, alpha=self.alpha * 0.7)
+                        c.setLineWidth(0.3)
+                        c.rect(span_x0, span_y0, span_x1 - span_x0, span_y1 - span_y0, fill=True, stroke=True)
+
+                        # Draw span JSONPath if enabled
+                        if self.show_json_path and span.json_path:
+                            c.setFillColorRGB(0, 0, 0)  # Black text
+                            c.setFont("Helvetica", self.font_size - 2)  # Even smaller for spans
+                            c.drawString(span_x0, span_y1 + 0.5, span.json_path)
+
         c.save()
         packet.seek(0)
         return packet
@@ -337,6 +380,7 @@ class OverlayRenderer:
         pdf_path: Union[str, Path],
         output_path: Union[str, Path],
         include_lines: bool = True,
+        include_spans: bool = False,
     ) -> Path:
         """Render overlay on PDF based on MinerU layout data.
 
@@ -345,6 +389,7 @@ class OverlayRenderer:
             pdf_path: Path to the source PDF file.
             output_path: Path to save the output PDF with overlay.
             include_lines: Whether to include line-level bounding boxes.
+            include_spans: Whether to include span-level bounding boxes (e.g., inline_equation).
 
         Returns:
             Path to the output PDF file.
@@ -363,7 +408,7 @@ class OverlayRenderer:
         reader = PdfReader(pdf_path)
 
         # Parse layout data
-        blocks_by_page = self.parse_layout_data(layout_data, include_lines=include_lines)
+        blocks_by_page = self.parse_layout_data(layout_data, include_lines=include_lines, include_spans=include_spans)
 
         # Create writer with clone_from to properly attach pages
         writer = PdfWriter(clone_from=reader)
@@ -378,7 +423,7 @@ class OverlayRenderer:
 
             if blocks:
                 # Create overlay page
-                overlay_packet = self._create_overlay_page(page_width, page_height, blocks)
+                overlay_packet = self._create_overlay_page(page_width, page_height, blocks, include_spans=include_spans)
                 overlay_pdf = PdfReader(overlay_packet)
                 overlay_page = overlay_pdf.pages[0]
 
@@ -468,6 +513,7 @@ class OverlayManager:
         pdf_path: Union[str, Path],
         output_path: Union[str, Path],
         include_lines: bool = True,
+        include_spans: bool = False,
     ) -> Path:
         """Render overlay on PDF based on layout data.
 
@@ -476,6 +522,7 @@ class OverlayManager:
             pdf_path: Path to the source PDF file.
             output_path: Path to save the output PDF with overlay.
             include_lines: Whether to include line-level bounding boxes.
+            include_spans: Whether to include span-level bounding boxes (e.g., inline_equation).
 
         Returns:
             Path to the output PDF file.
@@ -485,6 +532,7 @@ class OverlayManager:
             pdf_path=pdf_path,
             output_path=output_path,
             include_lines=include_lines,
+            include_spans=include_spans,
         )
 
     async def render_from_dict(
@@ -493,6 +541,7 @@ class OverlayManager:
         pdf_path: Union[str, Path],
         output_dir: Union[str, Path],
         include_lines: bool = True,
+        include_spans: bool = False,
     ) -> Path:
         """Render overlay and save to output directory.
 
@@ -501,6 +550,7 @@ class OverlayManager:
             pdf_path: Path to the source PDF file.
             output_dir: Directory to save the output PDF.
             include_lines: Whether to include line-level bounding boxes.
+            include_spans: Whether to include span-level bounding boxes (e.g., inline_equation).
 
         Returns:
             Path to the output PDF file.
@@ -514,4 +564,5 @@ class OverlayManager:
             pdf_path=pdf_path,
             output_path=output_path,
             include_lines=include_lines,
+            include_spans=include_spans,
         )

@@ -407,6 +407,7 @@ class TestBBoxAlignerVisualization:
             pdf_path=pdf_path,
             output_path=output_path,
             include_lines=True,
+            include_spans=True,
         )
 
         # Verify output

@@ -165,6 +165,28 @@ class TestOverlayRenderer:
         assert output_path.exists()
 
     @pytest.mark.asyncio
+    async def test_render_overlay_with_spans(self, layout_data, pdf_path, output_dir):
+        """Test rendering overlay with span-level boxes (including inline_equation)."""
+        renderer = OverlayRenderer()
+        output_path = output_dir / "test_overlay_with_spans.pdf"
+
+        result = await renderer.render_overlay(
+            layout_data=layout_data,
+            pdf_path=pdf_path,
+            output_path=output_path,
+            include_lines=True,
+            include_spans=True,
+        )
+
+        # Check output file was created
+        assert output_path.exists()
+        assert output_path.stat().st_size > 0
+
+        # Check PDF is valid
+        reader = PdfReader(output_path)
+        assert len(reader.pages) > 0
+
+    @pytest.mark.asyncio
     async def test_render_overlay_pdf_not_found(self, layout_data, output_dir):
         """Test error handling when PDF not found."""
         renderer = OverlayRenderer()
