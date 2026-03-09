@@ -44,6 +44,26 @@ class RenderConfig(BaseModel):
     outlier_width_threshold: float = Field(default=0.15, description="Outlier detection threshold for bbox alignment. Blocks with width difference ratio >= this threshold will be kept as-is (not stretched to column width)")
 
 
+class LLMConfig(BaseModel):
+    """LLM translation service configuration."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    base_url: str = Field(default="https://api.anthropic.com", description="OpenAI-compatible API base URL")
+    api_key: str = Field(default="", description="API key for LLM service")
+    model: str = Field(default="claude-sonnet-4-20250514", description="Model name")
+    max_tokens: int = Field(default=4096, description="Maximum tokens to generate")
+    temperature: float = Field(default=0.0, description="Temperature for generation")
+
+
+class TranslateConfig(BaseModel):
+    """Translate module configuration."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    llm: LLMConfig = Field(default=LLMConfig(), description="LLM configuration")
+
+
 class ExtractConfig(BaseModel):
     """Extract module configuration."""
 
@@ -60,6 +80,7 @@ class AppConfig(BaseModel):
     extract: ExtractConfig = Field(default=ExtractConfig(), description="Extract configuration")
     test: TestConfig = Field(default=TestConfig(), description="Test configuration")
     render: RenderConfig = Field(default=RenderConfig(), description="Render configuration")
+    translate: TranslateConfig = Field(default=TranslateConfig(), description="Translate configuration")
 
 
 class Config:
@@ -153,6 +174,10 @@ class Config:
     @property
     def render(self) -> RenderConfig:
         return self._settings.render
+
+    @property
+    def translate(self) -> TranslateConfig:
+        return self._settings.translate
 
 
 # Singleton instance that can be imported directly

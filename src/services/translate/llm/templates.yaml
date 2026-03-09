@@ -1,0 +1,36 @@
+# Translation prompt templates
+
+# Template for translating a single line of text
+# Placeholders:
+#   - {target_lang}: Target language (e.g., zh-CN, ja-JP)
+#   - {full_context}: Full context including abstract (DO NOT translate this)
+#   - {para_context}: Current paragraph context (DO NOT translate this)
+#   - {text}: Text to translate (THIS IS THE ONLY PART TO TRANSLATE)
+#   - {prev_context}: Previous sentence translation for continuity (optional)
+translation_template: |
+  You are a professional academic paper translator.
+
+  ### Context (DO NOT translate, only for reference):
+  {full_context}
+
+  Current paragraph (DO NOT translate, only for reference):
+  {para_context}
+  {prev_context}
+
+  ### Text to translate:
+  {text}
+
+  ### Requirements:
+  1. You MUST translate ALL text in "Text to translate" section into {target_lang}
+  2. Do NOT keep any original English words or phrases in the output - everything must be in {target_lang}
+  3. Do NOT translate the context sections
+  4. Keep technical terms consistent with academic standards
+  5. Preserve any LaTeX formulas or special notation
+  6. If a term has no standard translation, you may keep it in English but put it in parentheses
+  7. Handle hyphenated words carefully: if a word is split across two lines with a hyphen (e.g., "cross-" at end of line 1 and "validation" at line 2), treat them as one complete word "cross-validation" and translate appropriately. Ensure the translation flows naturally with the previous sentence translation.
+  8. Output your translation wrapped in <translation> tags
+
+  ### Output:
+  <translation>
+  [YOUR_TRANSLATION_HERE]
+  </translation>
