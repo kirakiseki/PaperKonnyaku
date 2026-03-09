@@ -60,7 +60,7 @@ class TranslationService:
         self.prompt_generator = TranslatePromptGenerator(layout_path)
         self.llm_client = llm_client
 
-    def _get_llm_client(self) -> LLMClient:
+    async def _get_llm_client(self) -> LLMClient:
         """Get or create LLM client."""
         if self.llm_client is None:
             from core.config import config
@@ -72,10 +72,13 @@ class TranslationService:
                 model=llm_config.model,
                 max_tokens=llm_config.max_tokens,
                 temperature=llm_config.temperature,
+                rpm=llm_config.rpm,
+                tpm=llm_config.tpm,
+                max_concurrent=llm_config.max_concurrent,
             )
         return self.llm_client
 
-    def translate(
+    async def translate(
         self,
         target_lang: str = "zh-CN",
         progress_callback: Optional[callable] = None,
@@ -96,7 +99,7 @@ class TranslationService:
 
         logger.info(f"Starting translation of {total} lines")
 
-        client = self._get_llm_client()
+        client = await self._get_llm_client()
 
         prev_translated: Optional[str] = None
 
@@ -109,7 +112,7 @@ class TranslationService:
 
                 try:
                     # Send to LLM
-                    response = client.translate(prompt)
+                    response = await client.chat(prompt)
 
                     # Parse JSON response to extract translation
                     translated = _parse_xml_response(response.content)
@@ -150,14 +153,14 @@ class TranslationService:
 
         finally:
             if self.llm_client is None:
-                client.close()
+                await client.aclose()
 
         success_count = sum(1 for r in results if r.success)
         logger.info(f"Translation completed: {success_count}/{total} successful")
 
         return results
 
-    def translate_and_save(
+    async def translate_and_save(
         self,
         output_path: Optional[str | Path] = None,
         target_lang: str = "zh-CN",
@@ -183,7 +186,7 @@ class TranslationService:
             layout_data = json.load(f)
 
         # Translate
-        results = self.translate(target_lang, progress_callback)
+        results = await self.translate(target_lang, progress_callback)
 
         # Create a lookup dict for translations
         translation_map: dict[tuple[int, int], str] = {}
@@ -223,4 +226,4 @@ class TranslationService:
                         if span.get("type") == "text" and span.get("content"):
                             key = (para_index, line_idx)
                             if key in translation_map:
-                                span["content"] = translation_map[key]
+                                span["translated"] = translation_map[key]

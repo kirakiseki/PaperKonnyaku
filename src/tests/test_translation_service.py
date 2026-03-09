@@ -3,7 +3,7 @@
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
 
 from core.config import config
 from services.translate.llm.service import TranslationService, TranslationResult
@@ -24,7 +24,7 @@ def layout_json_path():
 def mock_llm_client():
     """Create a mock LLM client."""
     client = Mock()
-    client.translate = Mock(
+    client.translate = AsyncMock(
         return_value=Mock(
             content="Translated: Hello",
             model="test-model",
@@ -93,23 +93,25 @@ class TestTranslationResult:
 class TestTranslationServiceTranslate:
     """Tests for translate method."""
 
-    def test_translate_with_mock_client(self, layout_json_path, mock_llm_client):
+    @pytest.mark.asyncio
+    async def test_translate_with_mock_client(self, layout_json_path, mock_llm_client):
         """Test translation with mock client."""
         service = TranslationService(layout_json_path, mock_llm_client)
 
-        results = service.translate(target_lang="zh-CN")
+        results = await service.translate(target_lang="zh-CN")
 
         assert len(results) > 0
         assert all(isinstance(r, TranslationResult) for r in results)
         # Check mock was called
         assert mock_llm_client.translate.called
 
-    def test_translate_progress_callback(self, layout_json_path, mock_llm_client):
+    @pytest.mark.asyncio
+    async def test_translate_progress_callback(self, layout_json_path, mock_llm_client):
         """Test translation with progress callback."""
         service = TranslationService(layout_json_path, mock_llm_client)
 
         progress_calls = []
-        results = service.translate(
+        results = await service.translate(
             target_lang="zh-CN",
             progress_callback=lambda current, total: progress_calls.append((current, total)),
         )
@@ -117,13 +119,14 @@ class TestTranslationServiceTranslate:
         assert len(progress_calls) == len(results)
         assert progress_calls[-1] == (len(results), len(results))
 
-    def test_translate_fallback_on_error(self, layout_json_path):
+    @pytest.mark.asyncio
+    async def test_translate_fallback_on_error(self, layout_json_path):
         """Test that translation falls back to original on error."""
         mock_client = Mock()
-        mock_client.translate = Mock(side_effect=Exception("API error"))
+        mock_client.translate = AsyncMock(side_effect=Exception("API error"))
 
         service = TranslationService(layout_json_path, mock_client)
-        results = service.translate(target_lang="zh-CN")
+        results = await service.translate(target_lang="zh-CN")
 
         # All should have fallback to original
         assert all(r.success is False for r in results)
@@ -133,7 +136,8 @@ class TestTranslationServiceTranslate:
 class TestTranslationServiceTranslateAndSave:
     """Tests for translate_and_save method."""
 
-    def test_translate_and_save(self, layout_json_path, mock_llm_client, tmp_path):
+    @pytest.mark.asyncio
+    async def test_translate_and_save(self, layout_json_path, mock_llm_client, tmp_path):
         """Test translating and saving to file."""
         service = TranslationService(layout_json_path, mock_llm_client)
 
@@ -141,7 +145,7 @@ class TestTranslationServiceTranslateAndSave:
 
         # Mock extract_all_text_lines to return controlled data
         with patch.object(service.prompt_generator, "extract_all_text_lines", return_value=[]):
-            result_path = service.translate_and_save(
+            result_path = await service.translate_and_save(
                 output_path=output_path,
                 target_lang="zh-CN",
             )
@@ -193,7 +197,8 @@ class TestTranslationServiceIntegration:
     """Integration tests for translation service."""
 
     @pytest.mark.integration
-    def test_translate_with_config(self):
+    @pytest.mark.asyncio
+    async def test_translate_with_config(self):
         """Test actual translation using config.toml with random samples."""
         import random
 
@@ -211,12 +216,12 @@ class TestTranslationServiceIntegration:
         lines = random.sample(all_lines, sample_size)
 
         results = []
-        client = service._get_llm_client()
+        client = await service._get_llm_client()
 
         try:
             for line in lines:
                 prompt = service.prompt_generator.build_translation_prompt(line, "zh-CN")
-                response = client.translate(prompt)
+                response = await client.translate(prompt)
 
                 from services.translate.llm.service import _parse_xml_response
                 translated = _parse_xml_response(response.content)
@@ -229,7 +234,7 @@ class TestTranslationServiceIntegration:
                     success=True,
                 ))
         finally:
-            client.close()
+            await client.aclose()
 
         print(f"\nTranslated {len(results)} lines (random sample):")
         for r in results:

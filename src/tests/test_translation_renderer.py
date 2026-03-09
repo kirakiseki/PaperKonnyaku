@@ -1,0 +1,447 @@
+"""Tests for translation rendering service."""
+
+import json
+from pathlib import Path
+
+import pytest
+from pypdf import PdfReader
+
+from core.config import config
+from services.render.font import FontManager
+from services.render.translation import (
+    TranslationItem,
+    TranslationManager,
+    TranslationRenderer,
+)
+
+
+# Test asset paths
+TEST_ASSETS_DIR = config.test.test_assets_dir
+LAYOUT_JSON_PATH = TEST_ASSETS_DIR / "extracted" / "layout.json"
+SOURCE_PDF_PATH = TEST_ASSETS_DIR / "source" / "test_example.pdf"
+OUTPUT_DIR = Path(__file__).parent / "output"
+
+
+@pytest.fixture
+def layout_data():
+    """Load layout data from JSON file."""
+    with open(LAYOUT_JSON_PATH) as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def layout_data_with_translations(layout_data):
+    """Create layout data with translated fields."""
+    # Add translated field to some spans
+    for page_info in layout_data.get("pdf_info", []):
+        for para in page_info.get("para_blocks", []):
+            for line in para.get("lines", []):
+                for span in line.get("spans", []):
+                    if span.get("type") == "text" and span.get("content"):
+                        # Add Chinese translation
+                        span["translated"] = f"翻译: {span['content']}"
+    return layout_data
+
+
+@pytest.fixture
+def pdf_path():
+    """Path to test PDF file."""
+    return SOURCE_PDF_PATH
+
+
+@pytest.fixture
+def output_dir():
+    """Create and return output directory."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    return OUTPUT_DIR
+
+
+@pytest.fixture
+def translation_renderer():
+    """Create a TranslationRenderer instance."""
+    return TranslationRenderer(font_size=10.0)
+
+
+@pytest.fixture
+def translation_manager():
+    """Create a TranslationManager instance."""
+    return TranslationManager(font_size=10.0)
+
+
+class TestTranslationItem:
+    """Tests for TranslationItem class."""
+
+    def test_init(self):
+        """Test TranslationItem initialization."""
+        item = TranslationItem(
+            bbox=[100, 200, 300, 400],
+            original="Hello",
+            translated="你好",
+            page_index=0,
+            para_index=1,
+            line_index=2,
+            span_index=0,
+        )
+        assert item.bbox == [100, 200, 300, 400]
+        assert item.original == "Hello"
+        assert item.translated == "你好"
+        assert item.page_index == 0
+        assert item.para_index == 1
+        assert item.line_index == 2
+        assert item.span_index == 0
+
+
+class TestTranslationRenderer:
+    """Tests for TranslationRenderer class."""
+
+    def test_init(self):
+        """Test renderer initialization."""
+        renderer = TranslationRenderer(font_size=12.0, text_color=(1, 0, 0))
+        assert renderer.font_size == 12.0
+        assert renderer.text_color == (1, 0, 0)
+
+    def test_init_defaults(self):
+        """Test renderer default initialization."""
+        renderer = TranslationRenderer()
+        assert renderer.font_size == 10.0
+        assert renderer.text_color == (0.0, 0.0, 0.0)
+        assert renderer.fill_color == (1.0, 1.0, 1.0)
+        assert renderer.line_spacing == 1.2
+        assert renderer.margin == 2.0
+
+    def test_register_system_font(self):
+        """Test registering a system font file using PyMuPDF."""
+        import platform
+
+        # Only test on macOS where system fonts exist
+        if platform.system() != "Darwin":
+            pytest.skip("System font test only runs on macOS")
+
+        # Find an existing system font
+        font_path = Path("/System/Library/Fonts/Geneva.ttf")
+        if not font_path.exists():
+            pytest.skip(f"Test font not found: {font_path}")
+
+        # Test font registration by directly creating FontManager
+        font_manager = FontManager()
+        registered_name = font_manager.register_font_from_path(str(font_path))
+
+        # Verify font is now registered
+        assert registered_name == "Geneva"
+
+    def test_register_font_not_found(self):
+        """Test fallback when font file not found."""
+        font_manager = FontManager()
+
+        # FontManager should handle fallback internally, check it's initialized
+        assert font_manager.font_name is not None
+
+    def test_register_font_from_path(self):
+        """Test registering a font from file path."""
+        import platform
+
+        # Only test on macOS
+        if platform.system() != "Darwin":
+            pytest.skip("Font path test only runs on macOS")
+
+        # Find an existing system font
+        font_path = Path("/System/Library/Fonts/Geneva.ttf")
+        if not font_path.exists():
+            pytest.skip(f"Test font not found: {font_path}")
+
+        font_manager = FontManager()
+        # Register using file path
+        registered_name = font_manager.register_font_from_path(str(font_path))
+
+        # Should use the font name derived from file path
+        assert registered_name == "Geneva"
+
+    def test_convert_bbox_to_pdf_coords(self):
+        """Test coordinate conversion from MinerU to PDF."""
+        renderer = TranslationRenderer()
+        bbox = [100, 100, 200, 200]
+        page_height = 841  # A4 page height in points
+
+        x0, y0, x1, y1 = renderer._convert_bbox_to_pdf_coords(bbox, page_height)
+
+        # x coordinates should remain the same
+        assert x0 == 100
+        assert x1 == 200
+        # y coordinates should be flipped
+        # y0 in PDF = page_height - bbox.y1 = 841 - 200 = 641
+        # y1 in PDF = page_height - bbox.y0 = 841 - 100 = 741
+        assert y0 == 641
+        assert y1 == 741
+
+    def test_extract_translation_items(self, layout_data_with_translations):
+        """Test extracting translation items from layout data."""
+        renderer = TranslationRenderer()
+        items_by_page = renderer._extract_translation_items(layout_data_with_translations)
+
+        # Check we have items
+        assert len(items_by_page) > 0
+
+        # Check first page has items
+        page_0_items = items_by_page.get(0, [])
+        assert len(page_0_items) > 0
+
+        # Check item structure
+        first_item = page_0_items[0]
+        assert isinstance(first_item, TranslationItem)
+        assert first_item.translated.startswith("翻译:")
+        assert first_item.original is not None
+
+    def test_extract_translation_items_no_translations(self, layout_data):
+        """Test extracting when no translations exist."""
+        renderer = TranslationRenderer()
+        items_by_page = renderer._extract_translation_items(layout_data)
+
+        # Should return empty dict when no translations
+        assert len(items_by_page) == 0
+
+    def test_estimate_font_size(self):
+        """Test font size estimation."""
+        renderer = TranslationRenderer(font_size=10.0)
+
+        # Text fits
+        size = renderer._estimate_font_size(100, "Hello", "Helvetica", 10.0)
+        assert size == 10.0
+
+        # Text too long, should scale down
+        size = renderer._estimate_font_size(50, "Hello World", "Helvetica", 10.0)
+        assert size < 10.0
+        assert size >= 4.0  # Minimum font size
+
+    def test_wrap_text(self):
+        """Test text wrapping."""
+        renderer = TranslationRenderer(font_size=10.0)
+
+        # Short text that fits
+        lines = renderer._wrap_text("Hello", 100, "Helvetica", 10.0)
+        assert lines == ["Hello"]
+
+        # Long text that needs wrapping
+        lines = renderer._wrap_text(
+            "This is a very long text that needs to be wrapped",
+            50,
+            "Helvetica",
+            10.0,
+        )
+        assert len(lines) > 1
+
+    @pytest.mark.asyncio
+    async def test_render_translation(
+        self,
+        layout_data_with_translations,
+        pdf_path,
+        output_dir,
+    ):
+        """Test rendering translations on PDF."""
+        renderer = TranslationRenderer(font_size=8.0)
+        output_path = output_dir / "test_translation_output.pdf"
+
+        result = await renderer.render_translation(
+            layout_data=layout_data_with_translations,
+            pdf_path=pdf_path,
+            output_path=output_path,
+        )
+
+        # Check output file was created
+        assert output_path.exists()
+        assert output_path.stat().st_size > 0
+
+        # Check PDF is valid
+        reader = PdfReader(output_path)
+        assert len(reader.pages) > 0
+
+    @pytest.mark.asyncio
+    async def test_render_translation_no_translations(
+        self,
+        layout_data,
+        pdf_path,
+        output_dir,
+    ):
+        """Test rendering when no translations exist (should copy original)."""
+        renderer = TranslationRenderer()
+        output_path = output_dir / "test_translation_no_items.pdf"
+
+        result = await renderer.render_translation(
+            layout_data=layout_data,
+            pdf_path=pdf_path,
+            output_path=output_path,
+        )
+
+        # Should still create output file
+        assert output_path.exists()
+
+        # PDF should have same number of pages as original
+        reader = PdfReader(output_path)
+        original_reader = PdfReader(pdf_path)
+        assert len(reader.pages) == len(original_reader.pages)
+
+    @pytest.mark.asyncio
+    async def test_render_translation_pdf_not_found(self, layout_data, output_dir):
+        """Test error handling when PDF not found."""
+        renderer = TranslationRenderer()
+        output_path = output_dir / "test_nonexistent.pdf"
+
+        with pytest.raises(FileNotFoundError):
+            await renderer.render_translation(
+                layout_data=layout_data,
+                pdf_path="/nonexistent/path.pdf",
+                output_path=output_path,
+            )
+
+
+class TestTranslationManager:
+    """Tests for TranslationManager class."""
+
+    def test_init(self):
+        """Test manager initialization."""
+        manager = TranslationManager(font_size=12.0)
+        assert manager.renderer.font_size == 12.0
+
+    def test_init_defaults(self):
+        """Test manager default initialization."""
+        manager = TranslationManager()
+        assert manager.renderer.font_size == 10.0
+
+    @pytest.mark.asyncio
+    async def test_from_files(self, layout_data_with_translations, output_dir):
+        """Test creating translated PDF from files."""
+        output_path = output_dir / "test_manager_from_files.pdf"
+
+        # First save layout data with translations to a temp file
+        temp_layout_path = output_dir / "temp_layout.json"
+        with open(temp_layout_path, "w", encoding="utf-8") as f:
+            json.dump(layout_data_with_translations, f, ensure_ascii=False, indent=2)
+
+        result = await TranslationManager.from_files(
+            layout_json_path=temp_layout_path,
+            pdf_path=SOURCE_PDF_PATH,
+            output_path=output_path,
+            font_size=8.0,
+        )
+
+        assert output_path.exists()
+        assert output_path.stat().st_size > 0
+
+        # Check PDF is valid
+        reader = PdfReader(output_path)
+        assert len(reader.pages) > 0
+
+    @pytest.mark.asyncio
+    async def test_from_files_json_not_found(self, output_dir):
+        """Test error when layout JSON not found."""
+        output_path = output_dir / "test_error.pdf"
+
+        with pytest.raises(FileNotFoundError):
+            await TranslationManager.from_files(
+                layout_json_path="/nonexistent/layout.json",
+                pdf_path=SOURCE_PDF_PATH,
+                output_path=output_path,
+            )
+
+    @pytest.mark.asyncio
+    async def test_render_translation(
+        self,
+        layout_data_with_translations,
+        pdf_path,
+        output_dir,
+    ):
+        """Test render_translation method."""
+        manager = TranslationManager(font_size=8.0)
+        output_path = output_dir / "test_manager_render.pdf"
+
+        result = await manager.render_translation(
+            layout_data=layout_data_with_translations,
+            pdf_path=pdf_path,
+            output_path=output_path,
+        )
+
+        assert output_path.exists()
+        assert output_path.stat().st_size > 0
+
+
+class TestFontManager:
+    """Tests for FontManager class."""
+
+    def test_init(self):
+        """Test FontManager initialization."""
+        font_manager = FontManager(font_size=12.0)
+        assert font_manager.font_size == 12.0
+
+    def test_init_defaults(self):
+        """Test FontManager default initialization."""
+        font_manager = FontManager()
+        assert font_manager.font_size == 10.0
+
+    def test_estimate_font_size(self):
+        """Test font size estimation."""
+        font_manager = FontManager(font_size=10.0)
+
+        # Text fits
+        size = font_manager.estimate_font_size(100, "Hello", 10.0)
+        assert size == 10.0
+
+        # Text too long, should scale down
+        size = font_manager.estimate_font_size(50, "Hello World", 10.0)
+        assert size < 10.0
+        assert size >= 4.0  # Minimum font size
+
+    def test_estimate_font_size_empty_text(self):
+        """Test font size estimation with empty text."""
+        font_manager = FontManager(font_size=10.0)
+        size = font_manager.estimate_font_size(100, "", 10.0)
+        assert size == 10.0
+
+    def test_wrap_text(self):
+        """Test text wrapping."""
+        font_manager = FontManager(font_size=10.0)
+
+        # Short text that fits
+        lines = font_manager.wrap_text("Hello", 100, 10.0)
+        assert lines == ["Hello"]
+
+        # Long text that needs wrapping
+        lines = font_manager.wrap_text(
+            "This is a very long text that needs to be wrapped",
+            50,
+            10.0,
+        )
+        assert len(lines) > 1
+
+    def test_wrap_text_empty(self):
+        """Test wrapping empty text."""
+        font_manager = FontManager(font_size=10.0)
+        lines = font_manager.wrap_text("", 100, 10.0)
+        assert lines == []
+
+    def test_wrap_text_single_char_width(self):
+        """Test wrapping when bbox is too narrow."""
+        font_manager = FontManager(font_size=10.0)
+        lines = font_manager.wrap_text("Hello", 5, 10.0)
+        assert lines == ["Hello"]
+
+    def test_register_font_from_path(self):
+        """Test registering font from file path."""
+        import platform
+
+        if platform.system() != "Darwin":
+            pytest.skip("Font path test only runs on macOS")
+
+        font_path = Path("/System/Library/Fonts/Geneva.ttf")
+        if not font_path.exists():
+            pytest.skip(f"Test font not found: {font_path}")
+
+        font_manager = FontManager()
+        registered_name = font_manager.register_font_from_path(str(font_path))
+
+        assert registered_name == "Geneva"
+
+    def test_register_font_from_path_not_found(self):
+        """Test error when font file not found."""
+        font_manager = FontManager()
+
+        with pytest.raises(ValueError):
+            font_manager.register_font_from_path("/nonexistent/font.ttf")

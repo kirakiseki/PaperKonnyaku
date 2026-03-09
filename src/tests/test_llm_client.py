@@ -1,7 +1,7 @@
 """Tests for LLM client."""
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
 
 from services.translate.llm.client import LLMClient, LLMResponse
 
@@ -86,12 +86,13 @@ class TestLLMClientBuildRequest:
         assert request["messages"][0]["content"] == "Translate this"
 
 
-class TestLLMClientTranslate:
-    """Tests for translate method."""
+class TestLLMClientChat:
+    """Tests for chat method (renamed from translate)."""
 
-    @patch("services.translate.llm.client.httpx.Client")
-    def test_translate_anthropic_success(self, mock_client_class):
-        """Test successful translation with Anthropic API."""
+    @pytest.mark.asyncio
+    @patch("services.translate.llm.client.httpx.AsyncClient")
+    async def test_chat_anthropic_success(self, mock_client_class):
+        """Test successful chat with Anthropic API."""
         mock_response = Mock()
         mock_response.json.return_value = {
             "content": [{"text": "Translated text"}],
@@ -100,21 +101,22 @@ class TestLLMClientTranslate:
         }
         mock_response.raise_for_status = Mock()
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        client = LLMClient(api_key="test-key")
-        result = client.translate("Translate this")
+        client = LLMClient(api_key="test-key", rpm=0, tpm=0)  # Disable rate limiting for test
+        result = await client.chat("Translate this")
 
         assert isinstance(result, LLMResponse)
         assert result.content == "Translated text"
         assert result.model == "claude-sonnet-4-20250514"
         assert result.usage == {"input_tokens": 100, "output_tokens": 50}
 
-    @patch("services.translate.llm.client.httpx.Client")
-    def test_translate_openai_success(self, mock_client_class):
-        """Test successful translation with OpenAI-compatible API."""
+    @pytest.mark.asyncio
+    @patch("services.translate.llm.client.httpx.AsyncClient")
+    async def test_chat_openai_success(self, mock_client_class):
+        """Test successful chat with OpenAI-compatible API."""
         mock_response = Mock()
         mock_response.json.return_value = {
             "choices": [{"message": {"content": "翻译文本"}}],
@@ -123,19 +125,20 @@ class TestLLMClientTranslate:
         }
         mock_response.raise_for_status = Mock()
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        client = LLMClient(base_url="https://api.openai.com", api_key="test-key", model="gpt-4o")
-        result = client.translate("Translate this")
+        client = LLMClient(base_url="https://api.openai.com", api_key="test-key", model="gpt-4o", rpm=0, tpm=0)
+        result = await client.chat("Translate this")
 
         assert isinstance(result, LLMResponse)
         assert result.content == "翻译文本"
         assert result.model == "gpt-4o"
 
-    @patch("services.translate.llm.client.httpx.Client")
-    def test_translate_request_url_anthropic(self, mock_client_class):
+    @pytest.mark.asyncio
+    @patch("services.translate.llm.client.httpx.AsyncClient")
+    async def test_chat_request_url_anthropic(self, mock_client_class):
         """Test that correct URL is used for Anthropic."""
         mock_response = Mock()
         mock_response.json.return_value = {
@@ -143,19 +146,20 @@ class TestLLMClientTranslate:
         }
         mock_response.raise_for_status = Mock()
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        client = LLMClient(api_key="test-key")
-        client.translate("Test")
+        client = LLMClient(api_key="test-key", rpm=0, tpm=0)
+        await client.chat("Test")
 
         mock_client.post.assert_called_once()
         call_args = mock_client.post.call_args
         assert call_args[0][0] == "https://api.anthropic.com/v1/messages"
 
-    @patch("services.translate.llm.client.httpx.Client")
-    def test_translate_request_url_openai(self, mock_client_class):
+    @pytest.mark.asyncio
+    @patch("services.translate.llm.client.httpx.AsyncClient")
+    async def test_chat_request_url_openai(self, mock_client_class):
         """Test that correct URL is used for OpenAI."""
         mock_response = Mock()
         mock_response.json.return_value = {
@@ -163,12 +167,12 @@ class TestLLMClientTranslate:
         }
         mock_response.raise_for_status = Mock()
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        client = LLMClient(base_url="https://api.openai.com", api_key="test-key")
-        client.translate("Test")
+        client = LLMClient(base_url="https://api.openai.com", api_key="test-key", rpm=0, tpm=0)
+        await client.chat("Test")
 
         mock_client.post.assert_called_once()
         call_args = mock_client.post.call_args
@@ -176,15 +180,16 @@ class TestLLMClientTranslate:
 
 
 class TestLLMClientContextManager:
-    """Tests for context manager."""
+    """Tests for async context manager."""
 
-    def test_context_manager(self):
+    @pytest.mark.asyncio
+    async def test_context_manager(self):
         """Test that context manager properly closes client."""
         client = LLMClient(api_key="test-key")
-        # Get the client to create the internal httpx.Client
-        _ = client._get_client()
+        # Get the client to create the internal httpx.AsyncClient
+        _ = await client._get_client()
 
-        with client:
+        async with client:
             pass
 
         # After context manager exits, client should be closed
@@ -223,8 +228,9 @@ class TestLLMClientIntegration:
     """
 
     @pytest.mark.integration
-    def test_translate_with_config(self):
-        """Test actual translation using config from config.toml."""
+    @pytest.mark.asyncio
+    async def test_chat_with_config(self):
+        """Test actual chat using config from config.toml."""
         from core.config import config
 
         llm_config = config.translate.llm
@@ -238,17 +244,21 @@ class TestLLMClientIntegration:
             model=llm_config.model,
             max_tokens=llm_config.max_tokens,
             temperature=llm_config.temperature,
+            rpm=llm_config.rpm,
+            tpm=llm_config.tpm,
+            max_concurrent=llm_config.max_concurrent,
         )
 
         prompt = "Translate the following English to Chinese: Hello, world!"
 
         try:
-            response = client.translate(prompt)
+            response = await client.chat(prompt)
             print(f"\nResponse: {response.content}")
             print(f"Model: {response.model}")
+            print(f"Stats: {client.stats}")
 
             assert response.content
             assert len(response.content) > 0
             assert response.model == llm_config.model
         finally:
-            client.close()
+            await client.aclose()

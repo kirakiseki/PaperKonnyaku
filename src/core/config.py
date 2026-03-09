@@ -42,6 +42,9 @@ class RenderConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     outlier_width_threshold: float = Field(default=0.15, description="Outlier detection threshold for bbox alignment. Blocks with width difference ratio >= this threshold will be kept as-is (not stretched to column width)")
+    # Translation rendering font settings
+    font_name: str = Field(default="PingFang SC", description="Font name for translated text rendering")
+    font_size: float = Field(default=10.0, description="Default font size for translated text")
 
 
 class LLMConfig(BaseModel):
@@ -54,6 +57,10 @@ class LLMConfig(BaseModel):
     model: str = Field(default="claude-sonnet-4-20250514", description="Model name")
     max_tokens: int = Field(default=4096, description="Maximum tokens to generate")
     temperature: float = Field(default=0.0, description="Temperature for generation")
+    # Rate limiting
+    rpm: int = Field(default=60, description="Requests per minute limit")
+    tpm: int = Field(default=100000, description="Tokens per minute limit")
+    max_concurrent: int = Field(default=10, description="Maximum concurrent requests")
 
 
 class TranslateConfig(BaseModel):
