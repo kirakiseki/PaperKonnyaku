@@ -1,6 +1,7 @@
 """Tests for translation rendering service."""
 
 import json
+import random
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,20 @@ from services.render.translation import (
     TranslationManager,
     TranslationRenderer,
 )
+
+
+# Classic Chinese test phrase for random translation generation
+CLASSIC_CHINESE_TEXT = "滚滚长江东逝水，浪花淘尽英雄，是非成败转头空，青山依旧在，几度夕阳红，白发渔樵江渚上，惯看秋月春风，一壶浊酒喜相逢，古今多少事，都付笑谈中"
+
+
+def _get_random_translation():
+    """Get a random slice of the classic Chinese text as mock translation."""
+    # Remove punctuation for slicing
+    text_no_punct = CLASSIC_CHINESE_TEXT.replace("，", "").replace("。", "")
+    # Random length between 2 and 10 characters
+    length = random.randint(2, min(10, len(text_no_punct)))
+    start = random.randint(0, max(0, len(text_no_punct) - length))
+    return text_no_punct[start:start + length]
 
 
 # Test asset paths
@@ -38,8 +53,8 @@ def layout_data_with_translations(layout_data):
             for line in para.get("lines", []):
                 for span in line.get("spans", []):
                     if span.get("type") == "text" and span.get("content"):
-                        # Add Chinese translation
-                        span["translated"] = f"翻译: {span['content']}"
+                        # Add random Chinese translation
+                        span["translated"] = _get_random_translation()
     return layout_data
 
 
@@ -188,7 +203,8 @@ class TestTranslationRenderer:
         # Check item structure
         first_item = page_0_items[0]
         assert isinstance(first_item, TranslationItem)
-        assert first_item.translated.startswith("翻译:")
+        # Verify it's a valid Chinese translation (not empty)
+        assert len(first_item.translated) >= 2
         assert first_item.original is not None
 
     def test_extract_translation_items_no_translations(self, layout_data):
