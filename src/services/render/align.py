@@ -295,7 +295,10 @@ class BBoxAligner:
     def _align_intra_paragraph(self, block: LayoutBlock) -> LayoutBlock:
         """Align all lines within a paragraph to the paragraph's bbox edges.
 
-        Every line's x0 will be set to block's x0, and x1 to block's x1.
+        First and last lines preserve their original indentation:
+        - First line: preserves left indentation (space before first span)
+        - Last line: preserves right indentation (space after last span)
+        - Middle lines: aligned to paragraph edges
 
         Args:
             block: The layout block to align.
@@ -310,18 +313,42 @@ class BBoxAligner:
         para_x1 = block.bbox_x1
         para_width = para_x1 - para_x0
 
+        num_lines = len(block.lines)
         new_lines = []
-        for line in block.lines:
+
+        for line_idx, line in enumerate(block.lines):
             line_old_width = line.bbox_x1 - line.bbox_x0
             if line_old_width <= 0:
                 # Invalid line, keep as is
                 new_lines.append(line)
                 continue
 
-            # Calculate relative position of content within the line
-            # Keep the content centered/scaled within the new width
-            new_x0 = para_x0
-            new_x1 = para_x1
+            is_first_line = (line_idx == 0)
+            is_last_line = (line_idx == num_lines - 1)
+
+            # Calculate original left/right spacing based on spans
+            # First span's left edge relative to line start
+            first_span_x0 = line.spans[0].bbox_x0 if line.spans else line.bbox_x0
+            # Last span's right edge relative to line end
+            last_span_x1 = line.spans[-1].bbox_x1 if line.spans else line.bbox_x1
+
+            left_space = first_span_x0 - line.bbox_x0  # Space before first span
+            right_space = line.bbox_x1 - last_span_x1  # Space after last span
+
+            # For first line, preserve left spacing
+            # For last line, preserve right spacing
+            # For middle lines, use 0 spacing
+            if is_first_line:
+                new_x0 = line.bbox_x0  # Preserve original left position
+                new_x1 = para_x1  # Align right edge to paragraph
+            elif is_last_line:
+                new_x0 = para_x0  # Align left edge to paragraph
+                new_x1 = line.bbox_x1  # Preserve original right position
+            else:
+                new_x0 = para_x0
+                new_x1 = para_x1
+
+            new_line_width = new_x1 - new_x0
 
             # Adjust spans proportionally
             new_spans = []
@@ -331,13 +358,13 @@ class BBoxAligner:
                     new_spans.append(span)
                     continue
 
-                # Calculate relative position ratio
+                # Calculate relative position ratio within original line
                 span_ratio_start = (span.bbox_x0 - line.bbox_x0) / line_old_width
                 span_ratio_end = (span.bbox_x1 - line.bbox_x0) / line_old_width
 
                 # Map to new line positions
-                new_span_x0 = new_x0 + span_ratio_start * para_width
-                new_span_x1 = new_x0 + span_ratio_end * para_width
+                new_span_x0 = new_x0 + span_ratio_start * new_line_width
+                new_span_x1 = new_x0 + span_ratio_end * new_line_width
 
                 new_spans.append(LayoutSpan(
                     bbox_x0=new_span_x0,
@@ -375,6 +402,8 @@ class BBoxAligner:
 
         All paragraphs in a column will have their bbox x0 and x1 aligned
         to the reference boundaries (computed excluding outliers like abstract).
+
+        First and last lines preserve their original indentation.
 
         Args:
             column_blocks: List of layout blocks in the same column.
@@ -423,20 +452,44 @@ class BBoxAligner:
             # Scale width to common column width
             width_ratio = common_width / old_width
 
-            new_x0 = min_x0
-            new_x1 = max_x1
+            # Compute reference left/right positions
+            ref_x0 = min_x0
+            ref_x1 = max_x1
 
-            # Adjust each line proportionally
+            num_lines = len(block.lines)
             new_lines = []
-            for line in block.lines:
+            for line_idx, line in enumerate(block.lines):
                 line_old_width = line.bbox_x1 - line.bbox_x0
                 if line_old_width <= 0:
                     new_lines.append(line)
                     continue
 
-                # Scale line to fit column width
-                new_line_x0 = new_x0 + (line.bbox_x0 - block.bbox_x0) * width_ratio
-                new_line_x1 = new_line_x0 + line_old_width * width_ratio
+                is_first_line = (line_idx == 0)
+                is_last_line = (line_idx == num_lines - 1)
+
+                # Calculate original left/right spacing based on spans
+                # First span's left edge relative to line start
+                first_span_x0 = line.spans[0].bbox_x0 if line.spans else line.bbox_x0
+                # Last span's right edge relative to line end
+                last_span_x1 = line.spans[-1].bbox_x1 if line.spans else line.bbox_x1
+
+                # For first line, preserve left spacing (space before first span)
+                # For last line, preserve right spacing (space after last span)
+                # For middle lines, stretch to column boundaries
+                if is_first_line:
+                    # First line: preserve left position, stretch right to column
+                    new_line_x0 = line.bbox_x0
+                    new_line_x1 = ref_x1
+                elif is_last_line:
+                    # Last line: stretch left to column, preserve right position
+                    new_line_x0 = ref_x0
+                    new_line_x1 = line.bbox_x1
+                else:
+                    # Middle lines: full stretch to column boundaries
+                    new_line_x0 = ref_x0 + (line.bbox_x0 - block.bbox_x0) * width_ratio
+                    new_line_x1 = new_line_x0 + line_old_width * width_ratio
+
+                new_line_width = new_line_x1 - new_line_x0
 
                 # Adjust spans proportionally
                 new_spans = []
@@ -449,8 +502,8 @@ class BBoxAligner:
                     span_ratio_start = (span.bbox_x0 - line.bbox_x0) / line_old_width
                     span_ratio_end = (span.bbox_x1 - line.bbox_x0) / line_old_width
 
-                    new_span_x0 = new_line_x0 + span_ratio_start * (new_line_x1 - new_line_x0)
-                    new_span_x1 = new_line_x0 + span_ratio_end * (new_line_x1 - new_line_x0)
+                    new_span_x0 = new_line_x0 + span_ratio_start * new_line_width
+                    new_span_x1 = new_line_x0 + span_ratio_end * new_line_width
 
                     new_spans.append(LayoutSpan(
                         bbox_x0=new_span_x0,
@@ -472,9 +525,9 @@ class BBoxAligner:
                 ))
 
             new_blocks.append(LayoutBlock(
-                bbox_x0=new_x0,
+                bbox_x0=ref_x0,
                 bbox_y0=block.bbox_y0,
-                bbox_x1=new_x1,
+                bbox_x1=ref_x1,
                 bbox_y1=block.bbox_y1,
                 block_type=block.block_type,
                 page_index=block.page_index,
