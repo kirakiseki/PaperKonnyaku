@@ -5,6 +5,7 @@ based on MinerU layout analysis results that contain "translated" fields.
 """
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -260,6 +261,14 @@ class TranslationRenderer:
                 font_name = self.font_manager.get_font_name_for_pymupdf()
                 font_file = self.font_manager.get_font_for_pymupdf()
 
+                # If using a custom font file, register it first
+                registered_font_name = None
+                if font_file and os.path.isfile(font_file):
+                    # Register font with a unique name based on font file
+                    font_basename = os.path.splitext(os.path.basename(font_file))[0]
+                    registered_font_name = f"Custom_{font_basename}"
+                    page.insert_font(fontname=registered_font_name, fontfile=font_file)
+
                 for item in items:
                     # PyMuPDF uses PDF coordinate system (origin at bottom-left)
                     # MinerU also uses bottom-left origin with y increasing upward
@@ -301,12 +310,14 @@ class TranslationRenderer:
                     start_y = y0 + (bbox_height - total_text_height) / 2 + font_size
 
                     # Draw white background to cover original text
-                    page.draw_rect(
-                        fitz.Rect(x0, y0, x1, y1),
-                        color=None,
-                        fill=self.fill_color,
-                        overlay=True,
-                    )
+                    # Use add_redact_annot + apply_redactions to remove original text in the bbox
+                    rect = fitz.Rect(x0, y0, x1, y1)
+                    page.add_redact_annot(rect, fill=self.fill_color)
+                    page.apply_redactions()
+
+                    # Re-register font after apply_redactions (font cache may be invalidated)
+                    if font_file and os.path.isfile(font_file):
+                        page.insert_font(fontname=registered_font_name, fontfile=font_file)
 
                     # Draw translated text
                     for i, line in enumerate(lines):
@@ -315,7 +326,17 @@ class TranslationRenderer:
                             break  # Don't draw outside bbox
 
                         # Insert text using PyMuPDF
-                        if font_file:
+                        if registered_font_name:
+                            # Use pre-registered font for proper embedding
+                            page.insert_text(
+                                fitz.Point(x0 + self.margin, text_y),
+                                line,
+                                fontsize=font_size,
+                                fontname=registered_font_name,
+                                color=self.text_color,
+                                overlay=True,
+                            )
+                        elif font_file:
                             page.insert_text(
                                 fitz.Point(x0 + self.margin, text_y),
                                 line,
